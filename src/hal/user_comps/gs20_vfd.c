@@ -122,6 +122,7 @@
                        11B: Change the operation source
             bit 15 Reserved
     0x2001 = Frequency command (xxx.xx Hz) *Eqv to GS2 0x091A Speed ref
+
 	0x2002 = 16 bit word
              bit 0 (1) EF (External Fault) ON *Eqv to GS2 0x91D
              bit 1 (1) Reset command *Eqv to GS2 0x91E
@@ -130,8 +131,8 @@
              bit 5 (1) Enable fire mode
              bit 15–6  Reserved for internal VFD use
 	total of 3 registers */
-#define START_REGISTER_W	0x2000
-#define NUM_REGISTERS_W		3
+#define START_REGISTER_W	0x2001
+#define NUM_REGISTERS_W		1
 
 #define GS20_REG_STOP_METHOD                            0x0016
 #define GS20_REG_STOP_METHOD__RAMP_TO_STOP              0
@@ -158,38 +159,38 @@ typedef struct {
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!this needs edit below
 /* HAL data struct */
 typedef struct {
-  hal_s32_t	*stat1;		// status words from the VFD.  Maybe split these out sometime
-  hal_s32_t	*stat2;
-  hal_float_t	*freq_cmd;	// frequency command
-  hal_float_t	*freq_out;	// actual output frequency
-  hal_float_t	*curr_out;	// output current
-  hal_float_t	*DCBusV;	//
-  hal_float_t	*outV;
-  hal_float_t	*RPM;
+  hal_s32_t	    *stat1;	   	  // rd status words from the VFD.  Maybe split these out sometime
+  hal_s32_t  	*stat2;       // rd
+  hal_float_t	*freq_cmd;	  // rd frequency command
+  hal_float_t	*freq_out;	  // rd actual output frequency
+  hal_float_t	*curr_out;	  // rd output current
+  hal_float_t	*DCBusV;	  // rd
+  hal_float_t	*outV;        // rd
+  hal_float_t	*RPM;         // rd
   hal_float_t	*scale_freq;
   hal_float_t	*power_factor;
   hal_float_t	*load_pct;
-  hal_s32_t	*FW_Rev;
-  hal_s32_t	errorcount;
+  hal_s32_t	    *FW_Rev;
+  hal_s32_t	    errorcount;
   hal_float_t	looptime;
   hal_float_t	speed_tolerance;
-  hal_s32_t	retval;
+  hal_s32_t 	retval;
   hal_bit_t		*at_speed;		// when drive freq_cmd == freq_out and running
   hal_bit_t		*is_stopped;	// when drive freq out is 0
-  hal_float_t	*speed_command;		// speed command input
+  hal_float_t	*speed_command; // wr speed command 0x2001
   hal_float_t	motor_hz;		// speeds are scaled in Hz, not RPM
   hal_float_t	motor_RPM;		// nameplate RPM at default Hz
-  hal_bit_t	*spindle_on;		// spindle 1=on, 0=off
-  hal_bit_t	*spindle_fwd;		// direction, 0=fwd, 1=rev
-  hal_bit_t *spindle_rev;		// on when in rev and running
-  hal_bit_t	*err_reset;		// reset errors when 1
-  hal_s32_t ack_delay;		// number of read/writes before checking at-speed
+  hal_bit_t 	*spindle_on;	// wr spindle 10=on, 01=off  0x2000 bit 1-0
+  hal_bit_t 	*spindle_fwd;	// wr direction, 01=fwd, 10=rev 0x2000 bit 5-4
+  hal_bit_t     *spindle_rev;	// wr direction, 01-fwd, 10-rev 0x2000 bit 5-4
+  hal_bit_t 	*err_reset;		// reset errors, 1-reset, 0x2002 bit 1
+  hal_s32_t     ack_delay;		// number of read/writes before checking at-speed
 
-  hal_bit_t	old_run;		// so we can detect changes in the run state
-  hal_bit_t	old_dir;
-  hal_bit_t	old_err_reset;
-  hal_bit_t    *ena_gs20comp;    // gs20 component enable pin
-  hal_bit_t    *isInitialized;    // initialized status pin
+  hal_bit_t 	old_run;		// so we can detect changes in the run state
+  hal_bit_t 	old_dir;
+  hal_bit_t 	old_err_reset;
+  hal_bit_t     *ena_gs20comp;  // wr enable pin 1-ena, 0-dis bit 12
+  hal_bit_t     *isInitialized; // initialized status pin
 } haldata_t;
 
 static int done;
@@ -471,52 +472,63 @@ int write_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *haldata) {
         haldata->motor_RPM = 1800;
     hzcalc = haldata->motor_hz/haldata->motor_RPM;
 
-    retval = modbus_write_register(
-        mb_ctx,
-        slavedata->write_reg_start,
-        abs((int)(*(haldata->speed_command)*hzcalc*10))
-    );
-
-    if (*(haldata->spindle_on) != haldata->old_run) {
-        if (*haldata->spindle_on){
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+1, 1);
-            comm_delay=0;
-        }
-        else
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+1, 0);
-        haldata->old_run = *(haldata->spindle_on);
-    }
-    if (*(haldata->spindle_fwd) != haldata->old_dir) {
-        if (*haldata->spindle_fwd)
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 0);
-        else
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 1);
-        haldata->old_dir = *(haldata->spindle_fwd);
-    }
-    if (*(haldata->spindle_fwd) || !(*(haldata->spindle_on)))  // JET turn on and off rev based on the status of fwd
-        *(haldata->spindle_rev) = 0;
-    if (!(*haldata->spindle_fwd) && *(haldata->spindle_on))
-        *(haldata->spindle_rev) = 1;
-    if (*(haldata->err_reset) != haldata->old_err_reset) {
-        if (*(haldata->err_reset))
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+4, 1);
-        else
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+4, 0);
-        haldata->old_err_reset = *(haldata->err_reset);
-    }
-    if (comm_delay < haldata->ack_delay){ // JET allow time for communications between drive and EMC
-        comm_delay++;
-    }
-    if ((*haldata->spindle_on) && comm_delay == haldata->ack_delay){ // JET test for up to speed
-        if ((*(haldata->freq_cmd))==(*(haldata->freq_out)))
-            *(haldata->at_speed) = 1;
-    }
-    if (*(haldata->spindle_on)==0){ // JET reset at-speed
-        *(haldata->at_speed) = 0;
-    }
+    retval = modbus_write_register(mb_ctx, slavedata->write_reg_start, abs((int)(*(haldata->speed_command)*hzcalc*10)));
     haldata->retval = retval;
     return retval;
 }
+
+/* Write the bits of the array in the remote device */
+int modbus_write_bits(modbus_t *mb_ctx, slavedata_t, int nb, haldata_t *haldata) {
+     int rc;
+     int i;
+     int byte_count;
+     int req_length;
+     int bit_check = 0;
+     int pos = 0;
+ 
+     uint8_t req[MAX_MESSAGE_LENGTH];
+ 
+     if (nb > MODBUS_MAX_WRITE_BITS) {
+         if (ctx->debug) {
+             fprintf(stderr, "ERROR Writing too many bits (%d > %d)\n",
+                     nb, MODBUS_MAX_WRITE_BITS);
+         }
+         errno = EMBMDATA;
+         return -1;
+     }
+     req_length = ctx->backend->build_request_basis(ctx, _FC_WRITE_MULTIPLE_COILS, addr, nb, req);
+     byte_count = (nb / 8) + ((nb % 8) ? 1 : 0);
+     req[req_length++] = byte_count;
+ 
+     for (i = 0; i < byte_count; i++) {
+         int bit;
+ 
+         bit = 0x01;
+         req[req_length] = 0;
+ 
+         while ((bit & 0xFF) && (bit_check++ < nb)) {
+             if (src[pos++])
+                 req[req_length] |= bit;
+             else
+                 req[req_length] &=~ bit;
+ 
+             bit = bit << 1;
+                      }
+         req_length++;
+     }
+ 
+     rc = send_msg(ctx, req, req_length);
+     if (rc > 0) {
+         uint8_t rsp[MAX_MESSAGE_LENGTH];
+ 
+         rc = receive_msg(ctx, rsp, MSG_CONFIRMATION);
+         if (rc == -1)
+             return -1;
+ 
+         rc = check_confirmation(ctx, req, rsp, rc);
+     } 
+     return rc;
+ }
 
 void usage(int argc, char **argv) {
     printf("Usage:  %s [options]\n", argv[0]);
