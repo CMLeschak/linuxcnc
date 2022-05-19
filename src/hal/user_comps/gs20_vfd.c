@@ -519,9 +519,9 @@ int write_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *haldata) {
 
     if (*(haldata->err_reset) != haldata->old_err_reset) {
         if (*(haldata->err_reset))
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 0000000000000010); //2
+            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 2); //2
         else
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 0000000000000000); //0
+            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 0); //0
         haldata->old_err_reset = *(haldata->err_reset);
     }
     if (comm_delay < haldata->ack_delay){ // JET allow time for communications between drive and EMC
