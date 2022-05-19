@@ -1,4 +1,4 @@
-VERSION = '1.223.187'
+VERSION = '1.223.192'
 
 '''
 qtplasmac_handler.py
@@ -48,7 +48,6 @@ from qtvcp.lib.keybindings import Keylookup
 from qtvcp.lib.preferences import Access
 from qtvcp.lib.qtplasmac import tooltips as TOOLTIPS
 from qtvcp.lib.qtplasmac import set_offsets as OFFSETS
-from qtvcp.lib.qtplasmac import run_from_line as RFL
 from qtvcp.lib.qtplasmac import updater as UPDATER
 from qtvcp.widgets.camview_widget import CamView as CAM
 from qtvcp.widgets.file_manager import FileManager as FILE_MAN
@@ -64,6 +63,7 @@ from qtvcp.widgets.status_label import StatusLabel as STATLABEL
 from qtvcp.widgets.stylesheeteditor import  StyleSheetEditor as SSE
 from qtvcp.lib.aux_program_loader import Aux_program_loader
 from qtvcp.lib.notify import Notify
+from plasmac import run_from_line as RFL
 from rs274.glcanon import GlCanonDraw
 from qt5_graphics import Lcnc_3dGraphics as DRO
 
@@ -415,6 +415,8 @@ class HandlerClass:
         self.old_returnFromDialog = EDITOR.returnFromDialog
         EDITOR.returnFromDialog = self.new_returnFromDialog
         DISPLAY.load_preference = self.new_load_preference
+        self.old_set_line_number = DISPLAY.set_line_number
+        DISPLAY.set_line_number = self.new_set_line_number
 
     # save a non gcode file and don't load it into linuxcnc
     def new_saveReturn(self, filename):
@@ -422,10 +424,8 @@ class HandlerClass:
         if saved is not None:
             self.w.gcode_editor.editor.setModified(False)
             if saved[-3:] in ['ngc', '.nc', 'tap']:
-                self.rflSelected = False
-                self.rflActive = False
-                self.startLine = 0
-                self.preRflFile = ''
+                if self.rflActive:
+                    self.clear_rfl()
                 ACTION.OPEN_PROGRAM(saved)
 
     # open a non gcode file and don't load it into linuxcnc
@@ -490,6 +490,14 @@ class HandlerClass:
     def new_load_preference(self, w):
         self.w.gcode_editor.editor.load_text(os.path.join(self.PATHS.CONFIGPATH, self.machineName + '.prefs'))
         self.w.gcode_editor.editor.setCursorPosition(self.w.gcode_editor.editor.lines(), 0)
+
+    # dont highlight lines selected from the editor in the preview window
+    def new_set_line_number(self, line):
+        if self.w.sender():
+            if self.w.sender().objectName() == 'gcode_editor_display':
+                return
+            else:
+                STATUS.emit('gcode-line-selected', line+1)
 
 # patched camera functions
     def camview_patch(self):
@@ -1443,6 +1451,7 @@ class HandlerClass:
                 self.w.gcode_stack.setCurrentIndex(0)
             self.w.file_reload.setEnabled(True)
         self.w.gcodegraphics.logger.clear()
+        self.w.gcodegraphics.clear_highlight()
         if self.preRflFile and self.preRflFile != ACTION.prefilter_path:
             self.rflActive = False
             self.startLine = 0
@@ -1591,24 +1600,28 @@ class HandlerClass:
         self.w.gcodegraphics.updateGL()
 
     def set_start_line(self, line):
-        if self.w.chk_run_from_line.isChecked():
-            if self.w.sender():
-                if self.w.sender().objectName() == 'gcode_editor_display':
-                    return
-            if line > 1:
-                msg0 = _translate('HandlerClass', 'SELECTED')
-                self.w.run.setText('{} {}'.format(msg0, line))
-                self.runText = '{} {}'.format(msg0, line)
-                self.rflSelected = True
-                self.startLine = line - 1
-            elif self.rflActive:
-                txt0 = _translate('HandlerClass', 'RUN FROM LINE')
-                txt1 = _translate('HandlerClass', 'CYCLE START')
-                self.runText = '{}\n{}'.format(txt0, txt1)
-            else:
-                self.startLine = 0
-                self.rflSelected = False
+        if self.fileOpened:
+            if self.w.chk_run_from_line.isChecked():
+                if self.w.sender():
+                    if self.w.sender().objectName() == 'gcode_editor_display':
+                        return
+                if line > 1:
+                    msg0 = _translate('HandlerClass', 'SELECTED')
+                    self.w.run.setText('{} {}'.format(msg0, line))
+                    self.runText = '{} {}'.format(msg0, line)
+                    self.rflSelected = True
+                    self.startLine = line - 1
+                elif self.rflActive:
+                    txt0 = _translate('HandlerClass', 'RUN FROM LINE')
+                    txt1 = _translate('HandlerClass', 'CYCLE START')
+                    self.runText = '{}\n{}'.format(txt0, txt1)
+                else:
+                    self.startLine = 0
+                    self.rflSelected = False
+                    self.w.gcodegraphics.clear_highlight()
+            if line < 1:
                 self.w.gcode_display.setCursorPosition(0, 0)
+                self.w.gcode_display.moveMarker(0)
 
     def update_gcode_properties(self, props):
         if props:
@@ -1637,7 +1650,7 @@ class HandlerClass:
 #########################################################################################################################
     def ext_run(self, state):
         if self.w.run.isEnabled() and state:
-            self.run_pressed()
+            self.run_clicked()
 
     def ext_abort(self, state):
         if self.w.abort.isEnabled() and state:
@@ -1666,7 +1679,7 @@ class HandlerClass:
 
     def ext_run_pause(self, state):
         if self.w.run.isEnabled() and state:
-            self.run_pressed()
+            self.run_clicked()
         elif self.w.pause.isEnabled() and state:
             ACTION.PAUSE()
 
@@ -1689,7 +1702,7 @@ class HandlerClass:
                 self.w.power.setDown(False)
                 self.w.power.click()
 
-    def run_pressed(self):
+    def run_clicked(self):
         if self.convBlockLoaded.get():
             self.wcs_rotation('get')
         if self.startLine and self.rflSelected:
@@ -1700,7 +1713,48 @@ class HandlerClass:
             self.rflSelected = False
             if self.developmentPin:
                 reload(RFL)
-            RFL.run_from_line(self, self.w, ACTION, STATUS, linuxcnc)
+            head = _translate('HandlerClass', 'GCODE ERROR')
+            data = RFL.run_from_line_get(self.lastLoadedProgram, self.startLine)
+            # cannot do run from line within a subroutine or if using cutter compensation
+            if data['error']:
+                if data['compError']:
+                    msg0 = _translate('HandlerClass', 'Cannot run from line while')
+                    msg1 = _translate('HandlerClass', 'cutter compensation is active')
+                    STATUS.emit('error', linuxcnc.OPERATOR_ERROR, '{}:\n{}\n{}\n'.format(head, msg0, msg1))
+                if data['subError']:
+                    msg0 = _translate('HandlerClass', 'Cannot do run from line')
+                    msg1 = _translate('HandlerClass', 'inside subroutine')
+                    msg2 = ''
+                    for sub in data['subError']:
+                        msg2 += ' {}'.format(sub)
+                    STATUS.emit('error', linuxcnc.OPERATOR_ERROR, '{}:\n{}\n{}{}\n'.format(head, msg0, msg1, msg2))
+                self.clear_rfl()
+                self.set_run_button_state()
+            else:
+                # get user input
+                userInput = self.dialog_run_from_line()
+                # rfl cancel clicked
+                if userInput['cancel']:
+                    self.clear_rfl()
+                    self.set_run_button_state()
+                else:
+                    # rfl load clicked
+                    rflFile = '{}rfl.ngc'.format(self.tmpPath)
+                    result = RFL.run_from_line_set(rflFile, data, userInput, self.unitsPerMm)
+                    # leadin cannot be used
+                    if result['error']:
+                        msg0 = _translate('HandlerClass', 'Unable to calculate a leadin for this cut')
+                        msg1 = _translate('HandlerClass', 'Program will run from selected line with no leadin applied')
+                        status.emit('error', operror, '{}:\n{}\n{}\n'.format(head, msg0, msg1))
+                    # load rfl file
+                    if ACTION.prefilter_path or self.lastLoadedProgram != 'None':
+                        self.preRflFile = ACTION.prefilter_path or self.lastLoadedProgram
+                    ACTION.OPEN_PROGRAM(rflFile)
+                    ACTION.prefilter_path = self.preRflFile
+                    self.set_run_button_state()
+                    txt0 = _translate('HandlerClass', 'RUN FROM LINE')
+                    txt1 = _translate('HandlerClass', 'CYCLE START')
+                    self.runText = '{}\n{}'.format(txt0, txt1)
         elif not self.run_critical_check():
             ACTION.RUN(0)
 
@@ -1882,10 +1936,8 @@ class HandlerClass:
     def file_clear_clicked(self):
         if self.fileOpened:
             self.fileClear = True
-            self.rflSelected = False
-            self.rflActive = False
-            self.startLine = 0
-            self.preRflFile = ''
+            if self.rflActive:
+                self.clear_rfl()
             clearFile = '{}qtplasmac_program_clear.ngc'.format(self.tmpPath)
             with open(clearFile, 'w') as outFile:
                 outFile.write('m2')
@@ -2030,10 +2082,8 @@ class HandlerClass:
 
     def file_reload_clicked(self):
         if self.rflActive:
-            self.rflActive = False
+            self.clear_rfl()
             self.set_run_button_state()
-            self.startLine = 0
-            self.preRflFile = ''
         if ACTION.prefilter_path or self.lastLoadedProgram != 'None':
             file = ACTION.prefilter_path or self.lastLoadedProgram
             if os.path.exists(file):
@@ -2302,7 +2352,7 @@ class HandlerClass:
         self.w.power.pressed.connect(lambda:self.power_button("pressed", True))
         self.w.power.released.connect(lambda:self.power_button("released", False))
         self.w.power.clicked.connect(lambda:self.power_button("clicked", None))
-        self.w.run.pressed.connect(self.run_pressed)
+        self.w.run.clicked.connect(self.run_clicked)
         self.w.pause.pressed.connect(self.pause_pressed)
         self.w.abort.pressed.connect(self.abort_pressed)
         self.w.file_reload.clicked.connect(self.file_reload_clicked)
@@ -2798,6 +2848,61 @@ class HandlerClass:
     def dlg_ok_clicked(self):
         self.dlg.accept()
 
+    def dialog_run_from_line(self):
+        rFl = QDialog(self.w)
+        rFl.setWindowTitle(_translate('HandlerClass', 'RUN FROM LINE'))
+        lbl1 = QLabel(_translate('HandlerClass', 'USE LEADIN:'))
+        lbl2 = QLabel(_translate('HandlerClass', 'LEADIN LENGTH:'))
+        lbl3 = QLabel(_translate('HandlerClass', 'LEADIN ANGLE:'))
+        lbl4 = QLabel('')
+        leadinDo = QCheckBox()
+        leadinLength = QDoubleSpinBox()
+        leadinAngle = QDoubleSpinBox()
+        buttons = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        buttonBox = QDialogButtonBox(buttons)
+        buttonBox.accepted.connect(rFl.accept)
+        buttonBox.rejected.connect(rFl.reject)
+        buttonBox.button(QDialogButtonBox.Ok).setText(_translate('HandlerClass', 'LOAD'))
+        buttonBox.button(QDialogButtonBox.Ok).setIcon(QIcon())
+        buttonBox.button(QDialogButtonBox.Cancel).setText(_translate('HandlerClass', 'CANCEL'))
+        buttonBox.button(QDialogButtonBox.Cancel).setIcon(QIcon())
+        layout = QGridLayout()
+        layout.addWidget(lbl1, 0, 0)
+        layout.addWidget(lbl2, 1, 0)
+        layout.addWidget(lbl3, 2, 0)
+        layout.addWidget(lbl4, 3, 0)
+        layout.addWidget(leadinDo, 0, 1)
+        layout.addWidget(leadinLength, 1, 1)
+        layout.addWidget(leadinAngle, 2, 1)
+        layout.addWidget(buttonBox, 4, 0, 1, 2)
+        rFl.setLayout(layout)
+        lbl1.setAlignment(Qt.AlignRight | Qt.AlignBottom)
+        lbl2.setAlignment(Qt.AlignRight | Qt.AlignBottom)
+        lbl3.setAlignment(Qt.AlignRight | Qt.AlignBottom)
+        if self.units == 'in':
+            leadinLength.setDecimals(2)
+            leadinLength.setSingleStep(0.05)
+            leadinLength.setSuffix(' inch')
+            leadinLength.setMinimum(0.05)
+        else:
+            leadinLength.setDecimals(0)
+            leadinLength.setSingleStep(1)
+            leadinLength.setSuffix(' mm')
+            leadinLength.setMinimum(1)
+        leadinAngle.setDecimals(0)
+        leadinAngle.setSingleStep(1)
+        leadinAngle.setSuffix(' deg')
+        leadinAngle.setRange(-359, 359)
+        leadinAngle.setWrapping(True)
+        result = rFl.exec_()
+        # load clicked
+        if result:
+            return {'cancel':False, 'do':leadinDo.isChecked(), 'length':leadinLength.value(), 'angle':leadinAngle.value()}
+        # cancel clicked
+        else:
+            return {'cancel':True}
+
+
     def invert_pin_state(self, halpin):
         if 'qtplasmac.ext_out_' in halpin:
             pin = 'out{}Pin'.format(halpin.split('out_')[1])
@@ -2936,6 +3041,12 @@ class HandlerClass:
                 ACTION.ENABLE_AUTOREPEAT_KEYS(' ')
             else:
                 ACTION.DISABLE_AUTOREPEAT_KEYS(' ')
+
+    def clear_rfl(self):
+        self.rflActive = False
+        self.startLine = 0
+        self.preRflFile = ''
+        self.w.gcodegraphics.clear_highlight()
 
 
 #########################################################################################################################
@@ -5469,7 +5580,7 @@ class HandlerClass:
     def on_keycall_RUN(self, event, state, shift, cntrl):
         if self.key_is_valid(event, state) and not shift and not self.w.main_tab_widget.currentIndex():
             if self.w.run.isEnabled():
-                self.run_pressed()
+                self.run_clicked()
             elif self.w.pause.isEnabled():
                 ACTION.PAUSE()
 
