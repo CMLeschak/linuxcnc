@@ -186,7 +186,6 @@ typedef struct {
   hal_bit_t     *spindle_rev;	// wr direction, 10B-rev, 0x2000 bit 5-4
   hal_bit_t 	*err_reset;		// reset errors, 1-reset, 0x2002 bit 1
   hal_s32_t     ack_delay;		// number of read/writes before checking at-speed
-
   hal_bit_t 	old_run;		// so we can detect changes in the run state
   hal_bit_t 	old_dir;        // so we can detect changes in direction
   hal_bit_t 	old_err_reset;  // so we can detect changes in rest output state
@@ -420,26 +419,6 @@ As long as the name variable does not return NULL, reg will add 1 to its value a
         */
         address = (reg->param_group << 8) | reg->param_number;
 
-        /*
-        MODBUS_API int modbus_read_registers(modbus_t *ctx, int addr, int nb, uint16_t *dest);
-        typedef struct _modbus modbus_t; explains modbus_t
-        
-        r = from modbus.h variable()
-
-        struct _modbus {
-        //Slave address 
-            int slave;
-        //Socket or file descriptor 
-            int s;
-            int debug;
-            int error_recovery;
-            struct timeval response_timeout;
-            struct timeval byte_timeout;
-            struct timeval indication_timeout;
-            const modbus_backend_t *backend;
-            void *backend_data;
-        };
-        */
         r = modbus_read_registers(mb_ctx, address, 1, &data);
         if (r != 1) {
             fprintf(
@@ -485,14 +464,15 @@ int write_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *haldata) {
         slavedata->write_reg_start+1,
         abs((int)(*(haldata->speed_command)*hzcalc*10))
     );
-    // NOTE****  These are all bits from the same register** 
-    //Code should accumulate the state of each condition, then write the entire reg value together
-    //************ Write Register 1 Value ***************
+    /*                  ****  These are all bits from the same register  ****
+    Code should accumulate the state of each condition, then write the entire reg value together
+    ************ Write Register 1 Value ***************
+    */
     if ((*(haldata->spindle_on) != haldata->old_run) || (*(haldata->spindle_fwd) != haldata->old_dir)) {
         if (*haldata->spindle_on){
             s_run_stop = 2;
             //modbus_write_register(mb_ctx, slavedata->write_reg_start, 0000000000000010); //2
-            //comm_delay=0;
+            comm_delay=0; //Not sure if this is needed
         }
         else
             s_run_stop = 1;
@@ -519,9 +499,9 @@ int write_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *haldata) {
 
     if (*(haldata->err_reset) != haldata->old_err_reset) {
         if (*(haldata->err_reset))
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 2); //2
+            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 2); // 0000000000000010
         else
-            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 0); //0
+            modbus_write_register(mb_ctx, slavedata->write_reg_start+2, 0); // 0000000000000000
         haldata->old_err_reset = *(haldata->err_reset);
     }
     if (comm_delay < haldata->ack_delay){ // JET allow time for communications between drive and EMC
@@ -613,6 +593,7 @@ int read_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *hal_data_bloc
         *(hal_data_block->curr_out) = receive_data[4] * 0.1;
         *(hal_data_block->DCBusV) = receive_data[5] * 0.1;
         *(hal_data_block->outV) = receive_data[6] * 0.1;
+
         *(hal_data_block->RPM) = receive_data[7];
         *(hal_data_block->scale_freq) = (receive_data[8] | (receive_data[9] << 16)) * 0.1;
         *(hal_data_block->power_factor) = receive_data[10];
@@ -743,6 +724,7 @@ int main(int argc, char **argv)
             case 'A':
                 accel_time = strtof(optarg, &endarg);
                 if (*endarg != '\0') {
+                
                     printf("gs20_vfd: ERROR: invalid acceleration time: %s\n", optarg);
                     retval = -1;
                     goto out_noclose;
