@@ -42,10 +42,10 @@
 #include <modbus.h>
 
 /* Read GS20 Registers:  *note: (GG=param group) (nn=param number) Hex GGnn ex: P04.10 = 0x040A
-	1-0x2100 = status word 1 
+	0-0x2100 = status word 1 
         High byte: Warning code
         Low Byte: Fault Code
-	2-0x2101 = status word 2 
+	1-0x2101 = status word 2 
         Bit 1-0: AC motor drive operation status
                  00B: The drive stops
                  01B: The drive is decelerating
@@ -63,21 +63,21 @@
         Bit 11: 1 Parameter locked
         Bit 12: 1 Enable to copy parameters from keypad
         Bit 15-13: Reserved for internal VFD use
-	3-0x2102 = frequency command
-	4-0x2103 = actual frequency
-	5-0x2104 = output current
-	6-0x2105 = DC bus voltage
-	7-0x2106 = actual output voltage
-	8-0x2107 = Current step for the multi-step speed operation ** changed from GS2
-	9-0x2108 = Reserved for internal VFD use
-    10-0x2109 = Digital Input Counter value (dont need)
-	11-0x210A = Output power factor angle (xxx.x) ** changed from GS2
-	12-0x210B = Output torque (xxx.x %)
-	13-0x210C = Actual motor speed (xxxxx rpm)
-    14-0x210D = Reserved for internal VFD use ** new but not used
-    15-0x210E = Reserved for internal VFD use ** new but not used
-    16-0x210F = Power output (x.xxx kW) ** new?
-	total of 16 registers		
+	2-0x2102 = frequency command
+	3-0x2103 = actual frequency
+	4-0x2104 = output current
+	5-0x2105 = DC bus voltage
+	6-0x2106 = actual output voltage
+	**7-0x2107 = Current step for the multi-step speed operation ** changed from GS2
+	**8-0x2108 = Reserved for internal VFD use
+    9-0x2109 = Digital Input Counter value (dont need)
+	10-0x210A = Output power factor angle (xxx.x) ** changed from GS2
+	11-0x210B = Output torque (xxx.x %)
+	12-0x210C = Actual motor speed (xxxxx rpm)
+    **13-0x210D = Reserved for internal VFD use ** new but not used
+    **14-0x210E = Reserved for internal VFD use ** new but not used
+    **15-0x210F = Power output (x.xxx kW) ** new?
+	total of 12 registers		
     NOTE: Interested in possibly adding the following individual read registers
     0x220E = IGBT temperature of the power module (xxx.x deg C)
     0x221B = DC bus voltage ripples (xxx.x V)
@@ -160,18 +160,18 @@ typedef struct {
 // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!this needs edit below
 /* HAL data struct */
 typedef struct {
-  hal_s32_t	    *stat1;	   	  // rd 1 status words from the VFD.  Maybe split these out sometime
-  hal_s32_t  	*stat2;       // rd 2
-  hal_float_t	*freq_cmd;	  // rd 3 frequency command *where you want to be
-  hal_float_t	*freq_out;	  // rd 4 actual output frequency *where you are
-  hal_float_t	*curr_out;	  // rd 5 output current
-  hal_float_t	*DCBusV;	  // rd 6 buss volgate
-  hal_float_t	*outV;        // rd 7 output voltage
-  hal_float_t	*RPM;         // rd 
-  hal_float_t	*scale_freq;  // rd reg? / reg? = scaled freq
-  hal_float_t	*power_factor;// rd 11 output power factor angle
-  hal_float_t	*load_pct;    // rd 12 output torque %
-  hal_s32_t	    *FW_Rev;      // rd ? dont read ? Firmware Revision..
+  hal_s32_t	    *stat1;	   	  // rd 0 status words from the VFD.  Maybe split these out sometime
+  hal_s32_t  	*stat2;       // rd 1
+  hal_float_t	*freq_cmd;	  // rd 2 frequency command *where you want to be
+  hal_float_t	*freq_out;	  // rd 3 actual output frequency *where you are
+  hal_float_t	*curr_out;	  // rd 4 output current
+  hal_float_t	*DCBusV;	  // rd 5 buss volgate
+  hal_float_t	*outV;        // rd 6 output voltage
+  hal_float_t	*power_factor;// rd 10 output power factor angle
+  hal_float_t	*load_pct;    // rd 11 output torque %
+  hal_float_t	*RPM;         // rd 12
+  //hal_float_t	*scale_freq;  // rd reg? / reg? = scaled freq  
+  //hal_s32_t	    *FW_Rev;      // rd 0x0006 Firmware Revision already brought in..
   hal_s32_t	    errorcount;   // Calculated if null return value
   hal_float_t	looptime;     // Monitors loop time of modbus cycle
   hal_float_t	speed_tolerance; // no idea
@@ -395,17 +395,9 @@ returnValue myFunction(Argument) {
     }
 void means returns no value.   */
 void gs20_show_config(modbus_t *mb_ctx) { 
-    gs20_reg *reg;  //*reg is an abreviated variable containing a pointer to the longer named gs20_reg structure
+    gs20_reg *reg;  //*reg is a pointer variable of the gs20_reg struct type
     int r;
-
 /*
-for loop where argument (reg = *&* address of gs20_register list point 0; pointerName reg ->"arrow operator" points to variableName name is not Equal to NULL;
-reg plus plus adds 1 )
-declare address an integer
-declare data an unsigned short *2 bytes of 16 bits
-
-maked address variable = 
-
 for (initializationStatement; testExpression; updateStatement)
 As long as the name variable does not return NULL, reg will add 1 to its value and rerun
 */
@@ -451,7 +443,7 @@ int write_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *haldata) {
     hal_float_t hzcalc;
     uint16_t s_run_stop; //Spindle Run / Stop cmd
     uint16_t s_dir; //Spindle Fwd / Rev cmd
-    unit16_t reg_0x2000_val; //Complete 16 bit register
+    uint16_t reg_0x2000_val; //Complete 16 bit register
 
     if (haldata->motor_hz<10)
         haldata->motor_hz = 60;
@@ -582,7 +574,7 @@ int read_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *hal_data_bloc
         retval = 0;
         hal_data_block->retval = retval;
         *(hal_data_block->stat1) = receive_data[0];
-        *(hal_data_block->stat2) = receive_data[1];
+        *(hal_data_block->stat2) = receive_data[1];  //*(hal_data_block->FW_Rev) = receive_data[1];//
         *(hal_data_block->freq_cmd) = receive_data[2] * 0.1;
         *(hal_data_block->freq_out) = receive_data[3] * 0.1;
         if (receive_data[3]==0) {	// JET if freq out is 0 then the drive is stopped
@@ -593,12 +585,9 @@ int read_data(modbus_t *mb_ctx, slavedata_t *slavedata, haldata_t *hal_data_bloc
         *(hal_data_block->curr_out) = receive_data[4] * 0.1;
         *(hal_data_block->DCBusV) = receive_data[5] * 0.1;
         *(hal_data_block->outV) = receive_data[6] * 0.1;
-
-        *(hal_data_block->RPM) = receive_data[7];
-        *(hal_data_block->scale_freq) = (receive_data[8] | (receive_data[9] << 16)) * 0.1;
         *(hal_data_block->power_factor) = receive_data[10];
-        *(hal_data_block->load_pct) = receive_data[11] * 0.1;
-        *(hal_data_block->FW_Rev) = receive_data[12];
+        *(hal_data_block->load_pct) = receive_data[11] * 0.1;        
+        *(hal_data_block->RPM) = receive_data[12];
     } else {
         hal_data_block->retval = retval;
         hal_data_block->errorcount++;
@@ -811,14 +800,14 @@ int main(int argc, char **argv)
     if (retval!=0) goto out_closeHAL;
     retval = hal_pin_float_newf(HAL_OUT, &(haldata->RPM), hal_comp_id, "%s.motor-RPM", modname);
     if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_float_newf(HAL_OUT, &(haldata->scale_freq), hal_comp_id, "%s.scale-frequency", modname);
-    if (retval!=0) goto out_closeHAL;
+    //retval = hal_pin_float_newf(HAL_OUT, &(haldata->scale_freq), hal_comp_id, "%s.scale-frequency", modname);
+    //if (retval!=0) goto out_closeHAL;
     retval = hal_pin_float_newf(HAL_OUT, &(haldata->power_factor), hal_comp_id, "%s.power-factor", modname);
     if (retval!=0) goto out_closeHAL;
     retval = hal_pin_float_newf(HAL_OUT, &(haldata->load_pct), hal_comp_id, "%s.load-percentage", modname);
     if (retval!=0) goto out_closeHAL;
-    retval = hal_pin_s32_newf(HAL_OUT, &(haldata->FW_Rev), hal_comp_id, "%s.firmware-revision", modname);
-    if (retval!=0) goto out_closeHAL;
+    //retval = hal_pin_s32_newf(HAL_OUT, &(haldata->FW_Rev), hal_comp_id, "%s.firmware-revision", modname);
+    //if (retval!=0) goto out_closeHAL;
     retval = hal_param_s32_newf(HAL_RW, &(haldata->errorcount), hal_comp_id, "%s.error-count", modname);
     if (retval!=0) goto out_closeHAL;
     retval = hal_param_float_newf(HAL_RW, &(haldata->looptime), hal_comp_id, "%s.loop-time", modname);
@@ -862,10 +851,10 @@ int main(int argc, char **argv)
     *(haldata->DCBusV) = 0;
     *(haldata->outV) = 0;
     *(haldata->RPM) = 0;
-    *(haldata->scale_freq) = 0;
+    //*(haldata->scale_freq) = 0;
     *(haldata->power_factor) = 0;
     *(haldata->load_pct) = 0;
-    *(haldata->FW_Rev) = 0;
+    //*(haldata->FW_Rev) = 0;
     haldata->errorcount = 0;
     haldata->looptime = 0.1;
     haldata->motor_RPM = 1730;
