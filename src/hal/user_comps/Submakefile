@@ -31,6 +31,19 @@ $(call TOOBJSDEPS, $(GS2_SRCS)) : EXTRAFLAGS += $(GS2_CCFLAGS)
 USERSRCS += $(GS2_SRCS)
 TARGETS += ../bin/gs2_vfd
 
+GS20_SRCS := hal/user_comps/gs20_vfd.c
+GS20_LDFLAGS := $(GLIB_LIBS) $(LIBMODBUS_LIBS)
+GS220_CCFLAGS := $(GLIB_CFLAGS) $(LIBMODBUS_CFLAGS)
+
+$(call TOOBJSDEPS, $(GS20_SRCS)) : EXTRAFLAGS += $(GS20_CCFLAGS)
+
+../bin/gs20_vfd: $(call TOOBJS, $(GS20_SRCS)) ../lib/liblinuxcnchal.so.0
+	$(ECHO) Linking $(notdir $@)
+	$(Q)$(CC) -o $@ $^ $(LDFLAGS) $(GS20_LDFLAGS)
+
+USERSRCS += $(GS20_SRCS)
+TARGETS += ../bin/gs20_vfd
+
 HY_GT_SRCS := hal/user_comps/hy_gt_vfd.c
 HY_GT_LDFLAGS := $(LIBMODBUS_LIBS)
 HY_GT_CCFLAGS := $(LIBMODBUS_CFLAGS)
