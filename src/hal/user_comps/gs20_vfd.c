@@ -37,7 +37,7 @@
 #include <signal.h>
 #include <errno.h>
 #include <getopt.h>
-#include "rtapi.h"
+#include <rtapi.h>
 #include "hal.h"
 #include <modbus.h>
 
